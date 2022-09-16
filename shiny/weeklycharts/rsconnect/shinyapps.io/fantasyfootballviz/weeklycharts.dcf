@@ -1,0 +1,13 @@
+name: weeklycharts
+title: weeklycharts
+username:
+account: fantasyfootballviz
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 7028716
+bundleId: 6309698
+url: https://fantasyfootballviz.shinyapps.io/weeklycharts/
+when: 1663344893.72228
+lastSyncTime: 1663344893.72229
+asMultiple: FALSE
+asStatic: FALSE
