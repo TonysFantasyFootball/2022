@@ -1,3 +1,3 @@
 # 2022
 
-<a>https://fantasyfootballviz.shinyapps.io/weeklycharts/</a>
+<a>https://www.charcoalcharts.com/fantasyfootballviz?leagueID=639569/</a>
