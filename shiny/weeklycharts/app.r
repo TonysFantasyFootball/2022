@@ -1,32 +1,32 @@
-#install.packages('rsconnect')
-#rsconnect::setAccountInfo(name='fantasyfootballviz', token='C0875C07BD680870F1C34A41B468344B', secret='D+HtbX0SEMqLfeVOxPWMq5HgAx2cglHAiy00rfYw')
 #setwd("C:/Users/chip/OneDrive/Documents/R/shiny- fantasy football")
-#runApp("weeklycharts")
-#deployApp("weeklycharts",account='fantasyfootballviz')
-#terminateApp("weeklycharts",account='fantasyfootballviz')
-#input=list(); input$leagueID=1682008834; input$Year=2022; input$Week=1; input$match=F
+#input=list(); input$leagueID=1682008834; input$Year=2022; input$Week=1; input$match=T
+#input=list(); input$leagueID=252353; input$Year=2020; input$Week=7; input$match=F
+
 
 library(shiny)
+library(shinycssloaders)
 library(fflr)
 
+yr=ffl_year()
+wk=ffl_week()
 bad="#d12d21"; good="#14b31c"
 
 
-ui=fluidPage(
+ui=fluidPage(     tags$head(tags$style(type = "text/css", "a{color: #808080;}")),
   fluidRow(
-     column(2,textInput("leagueID", "ESPN Leaguge ID", value = "1682008834", width="240px"))
-    ,column(1,uiOutput("yr"))
-    ,column(1,uiOutput("wk"))
+     column(2,textInput("leagueID", "ESPN League ID", value = "1682008834", width="240px"))
+    ,column(1,numericInput("Year", " Year", yr, 2004, yr, 1, "90px"))
+    ,column(1,numericInput("Week", " Week", wk-1, 1, 18, 1, "60px"))
     ,column(1,checkboxInput("match","Group by Matchups"))
   )#fluidRow
   ,tabsetPanel(
-    tabPanel("Projections & Results", plotOutput("plot1","100%","1000px"))
-    ,tabPanel("Possible Lineup Scores", plotOutput("plot2","100%","1000px"))
-    ,tabPanel("Time Series", plotOutput("plot3","100%","1000px"))
+     tabPanel("Projections & Results", withSpinner(plotOutput("plot1","100%","1000px"),type=1,color=gray(.7),size=2))
+    ,tabPanel("Possible Lineup Scores", withSpinner(plotOutput("plot2","100%","1000px"),type=6,color=gray(.5),size=2))
+    ,tabPanel("Time Series", withSpinner(plotOutput("plot3","100%","1000px"),type=7,color=gray(.3),size=2))
     ,tabPanel("Resources", div(
               HTML("<br><br><p>How to make your league viewable to the public: <a href='https://support.espn.com/hc/en-us/articles/360000064451-Making-a-Private-League-Viewable-to-the-Public'>https://support.espn.com/hc/en-us/articles/360000064451-Making-a-Private-League-Viewable-to-the-Public</a></p>")
               ,img(src="img.png")
-              ,HTML("<br><br><p>Be patient. Give the charts some time to load</p>")
+              #,HTML("<br><br><p>Be patient. Give the charts some time to load</p>")
               )
               
               )
@@ -35,25 +35,35 @@ ui=fluidPage(
 
 
 
-server = function(input, output) {
+server = function(input, output, session) {
   
-  yw=reactive({c(ffl_year(),ffl_week())})
+
+  observe({
+    query=parseQueryString(session$clientData$url_search)
+    if (!is.null(query[['leagueID']])) {
+      updateTextInput(session, "leagueID", value = query[['leagueID']])
+    }})
   
-  output$yr=renderUI({numericInput("Year", " \nYear", yw()[1], 2022, yw()[1], 1, "90px")})
-  output$wk=renderUI({numericInput("Week", " \nWeek", yw()[2]-1, 1, 18, 1, "60px")})
  
 tm=reactive({
-  ffl_id(input$leagueID)  #### Check Historic
-  lt=league_teams(input$leagueID)
+  ffl_id(input$leagueID); histo=input$Year!=yr
+  lt=league_teams(input$leagueID,histo); if(histo) lt=lt[[as.character(input$Year)]]
   data.frame(teamId=lt$teamId,name=paste(lt$location,lt$nickname))
 })
    
 d=reactive({
-  ffl_id(input$leagueID)
-  w1=team_roster(input$leagueID,input$Year!=ffl_year(),input$Week)
-  if(input$Year<ffl_year() & length(w1)>0) w1=w1[as.character(input$Year)]
+  ffl_id(input$leagueID); histo=input$Year!=yr
+  w1=team_roster(input$leagueID,histo,input$Week); if(histo) w1=w1[[as.character(input$Year)]]
   w=w1[[1]]; for(i in 2:length(w1)) w=rbind(w,w1[[i]])
-  w[w$lineupSlot!="IR",c(3,5,6,7,8,10,12,13)]
+  w[w$lineupSlot!="IR" & !is.na(w$actualScore),c(3,5,6,7,8,10,12,13)]
+})
+
+m=reactive({
+  ffl_id(input$leagueID,T); histo=input$Year!=yr
+  mp=tidy_schedule(input$leagueID,histo)
+  if(histo){ mp=do.call("rbind",mp); mp=mp[mp$seasonId==input$Year,]}
+  mp=mp[mp$matchupPeriodId==input$Week,]
+  mp[order(mp$teamId),]
 })
 
     output$plot1=renderPlot({
@@ -62,19 +72,15 @@ d=reactive({
     tot=tapply(ds$actualScore,ds$teamId,sum)
     top=tapply(ds$projectedScore,ds$teamId,sum)
     nx=names(tot)
-    ord=order(-tot)
+    ord1=order(-tot)
     
     if(input$match){
-      ffl_id(input$leagueID,T)
-      mp=tidy_schedule(input$leagueID)   ###Check Historic
-      mp=mp[mp$matchupPeriodId==input$Week,]
-      mp=mp[order(mp$teamId),]
-      av=ave(tot,mp$matchupId,FUN=max)
-      ord=order(-av,-tot)
+      av=ave(tot,m()$matchupId,FUN=max)
+      ord1=order(-av,-tot)
     }
 
-    mxy=max(c(tot,top))
-    mxx=max(c(ds$actualScore,ds$projectedScore))
+    mxy=max(tot,top)
+    mxx=max(ds$actualScore,ds$projectedScore)
     sdx=round(ds$actualScore-ds$projectedScore)
     colx1=colorRampPalette(c(bad,gray(.8)))(1-min(sdx))
     colx2=colorRampPalette(c(gray(.8),good))(max(sdx)+1)
@@ -84,13 +90,13 @@ d=reactive({
     coly2=colorRampPalette(c(gray(.8),good))(max(sdy)+1)
     coly=c(coly1,coly2[-1]); sdy=sdy-min(sdy)+1
 
-    cs=max(ord)/2; if(cs%%2!=0) cs=cs+1
+    cs=max(ord1)/2; if(cs%%2!=0) cs=cs+1
     
     par(mar=rep(0,4),mfrow=c(2,cs))
 
     
 ix=input$match+0
-for(i in ord){
+for(i in ord1){
   a=ds[ds$teamId==nx[i],]
   plot(c(0,10)*(1-2*ix),c(0,10),type="n",xaxt="n",yaxt="n",bty="n")
   text(0,9.5,tm()$name[i],cex=2,adj=ix,font=2)
@@ -120,12 +126,13 @@ output$plot2=renderPlot({
       bp[[j]]=dxi$playerId[dxi$position==pos[j]]
       if(pos[j]=="FLEX") bp[[j]]=dxi$playerId[dxi$position%in%c("RB","WR","TE")]
     }
+    rmx=which(sapply(bp,length)==0); if(length(rmx)>0) bp=bp[-rmx]
     g=expand.grid(bp)
     gm=t(apply(g,1,sort))
     gs=unique(gm)
     for(k in 1:nrow(dxi)) gs[gs==dxi$playerId[k]]=dxi$actualScore[k]
-    x=rowSums(gs)
-    b[[i]]=table(factor(round(x),levels=seq(round(min(x)),round(max(x)),by=1)))
+    x=round(rowSums(gs))
+    b[[i]]=table(factor(x,levels=seq(min(x),max(x),1)))
     tx$score[i]=sum(dxi$actualScore[dxi$lineupSlot!="BE"])
   }
   
@@ -134,19 +141,15 @@ output$plot2=renderPlot({
     y=as.numeric(names(b[[i]]))
     my1[i]=max(b[[i]]); mx1[i]=max(y)}
   mx=max(mx1); my=max(my1)
-  ord=order(-mx1)
+  ord2=order(-mx1)
   
   if(input$match){
-    ffl_id(input$leagueID,T)
-    mm=tidy_schedule(input$leagueID)   ###Check Historic
-    mm=mm[mm$matchupPeriodId==input$Week,]
-    mm=mm[order(mm$teamId),]
-    am=ave(mx1,mm$matchupId,FUN=max)
-    ord=order(-am,-mx1)
+    am=ave(mx1,m()$matchupId,FUN=max)
+    ord2=order(-am,-mx1)
   }
   
-  tx=tx[ord,]
-  b=b[ord]
+  tx=tx[ord2,]
+  b=b[ord2]
 
   par(mar=rep(0,4))
   plot(c(-4,10),c(.5,nt+.5),type="n",xaxt="n",yaxt="n",bty="n")
@@ -154,51 +157,49 @@ output$plot2=renderPlot({
   for(i in 1:nt){
     z=b[[i]]; nz=as.numeric(names(z))
     lines(c(0,10*(min(nz)-1)/mx),rep(nt+1-i,2))
-    for(j in 1:length(z)) lines(10*rep(nz[j],2)/mx,nt+1-i+c(-1,1)*z[j]/my/2,lwd=7,col=ifelse(nz[j]>tx$score[i],bad,good))
+    points(10*nz[z==0]/mx,rep(nt+1.0-i,sum(z==0)),pch="-",col=ifelse(nz[z==0]>tx$score[i],bad,good))
+    for(j in which(z>0)) lines(10*rep(nz[j],2)/mx,nt+1-i+c(-1,1)*z[j]/my/2,lwd=7,col=ifelse(nz[j]>tx$score[i],bad,good))
     if(input$match & i%%2==1) lines(rep(0,2),c(nt+1-i,nt-i))
-  }  
+  }
+  
+
+})
   
  
 output$plot3=renderPlot({
-  ffl_id(input$leagueID,T)
-  hx=data.frame(teamId=NA,wk=NA,actual=NA,proj=NA,best=NA)[-1,]; hn=names(hx)
+  ffl_id(input$leagueID,T); histo=input$Year!=yr
 
-  for(k in 1:input$Week){
-    h=best_roster(input$leagueID,scoringPeriodId=k)
-    for(i in 1:length(h)){
-      hx=rbind(hx,c(h[[i]]$teamId[1],k
-                    ,sum(h[[i]]$actualScore[!h[[i]]$actualSlot%in%c("BE","IR")])
-                    ,sum(h[[i]]$projectedScore[!h[[i]]$actualSlot%in%c("BE","IR")])
-                    ,sum(h[[i]]$actualScore[!h[[i]]$lineupSlot%in%c("BE","IR")])
-                    ))
-
-    }
+  h=tidy_scores(input$leagueID,histo,T); if(histo){ h=do.call("rbind",h); h=h[h$seasonId==input$Year, ] }
+  h=h[h$matchupPeriodId<=input$Week,]
+  
+  if(input$leagueID==1682008834 & input$Year==2022 & yr==2022){
+    hc1=team_roster(input$leagueID,F,1)
+    hc2=c(); for(i in 1:length(hc1)) hc2[i]=sum(hc1[[i]]$actualScore[!hc1[[i]]$lineupSlot%in%c("BE","IR")])
+    h$totalPoints[h$matchupPeriodId==1]=hc2
   }
-  names(hx)=hn
+  
+  hx=data.frame(teamId=h$teamId, wk=h$matchupPeriodId, actual=h$totalPoints)
+  
 
-  mh=tidy_schedule(input$leagueID)
-  mh=mh[mh$matchupPeriodId<=input$Week,]
-
-  hx$win=0; for(i in 1:nrow(hx)){
-    h1=as.numeric(mh[mh$teamId==hx[i,1] & mh$matchupPeriodId==hx[i,2],3])
-    h2=as.numeric(mh[mh$matchupId==h1 & mh$teamId!=hx[i,1],4])
-    h3=hx[hx[,1]==h2 & hx[,2]==hx[i,2],3]
-    hx$win[i]=hx[i,3]>h3+0
+  hx$opp=0; for(i in 1:nrow(hx)){
+    h1=h$matchupId[h$teamId==hx$teamId[i] & h$matchupPeriodId==hx$wk[i]]
+    hx$opp[i]=h$totalPoints[h$matchupId==h1 & h$teamId!=hx$teamId[i]]
   }
+  hx$win=hx$actual>hx$opp+0
 
-  ord=order(-tapply(hx$win,hx$teamId,sum))
-  mxh=max(hx)
+  ord3=order(-tapply(hx$win,hx$teamId,sum),-tapply(hx$actual,hx$teamId,sum))
+  mxh=max(hx$actual,hx$opp)
+  mnh=min(hx$actual,hx$opp)
+  
+  
 
-  par(mar=c(1,1,3,1),mfrow=c(ceiling(length(ord)/3),3))
-  for(i in ord){
-    hxi=hx[hx$teamId==i,]
-    plot(c(1,input$Week+1),c(10,mxh),type="n",bty="l",yaxt="n",xaxt="n",xlab="",ylab="", main=tm()$name[i],cex.main=3)
+  par(mar=c(1,1,3,1),mfrow=c(ceiling(length(ord3)/3),3))
+  for(i in ord3){
+    hxi=hx[hx$teamId==tm()$teamId[i],]
+    plot(c(1,input$Week+1),c(mnh-.1*(mxh-mnh),mxh+.1*(mxh-mnh)),type="n",bty="l",yaxt="n",xaxt="n",xlab="",ylab="", main=tm()$name[i],cex.main=3)
     lines(hxi$wk,hxi$actual)
-    points(hxi$wk,hxi$best,pch=15,col=gray(.8),cex=5)
+    if(input$match) points(hxi$wk,hxi$opp,pch=15,col=gray(.8),cex=5)
     points(hxi$wk,hxi$actual,pch=15,col=ifelse(hxi$win,good,bad),cex=5)
-    points(hxi$wk,hxi$proj,pch=0,lwd=2,cex=5)
-
-
   }
 
 
@@ -210,8 +211,7 @@ output$plot3=renderPlot({
   #output$plot1=renderPlot({plot(1:10)})
   #output$plot2=renderPlot({plot(10:1)})
   #output$plot3=renderPlot({plot(rep(5,10))})
-   
-})
+  
   
   
   
