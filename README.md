@@ -1,3 +1,3 @@
 # 2022
 
-<a>https://www.charcoalcharts.com/fantasyfootballviz?leagueID=639569 target="_blank"</a>
+<a href="https://www.charcoalcharts.com/fantasyfootballviz?leagueID=639569" target="_blank">https://www.charcoalcharts.com/fantasyfootballviz?leagueID=639569</a>
